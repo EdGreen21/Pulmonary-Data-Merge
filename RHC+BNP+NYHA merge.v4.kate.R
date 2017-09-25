@@ -1,8 +1,6 @@
 #RHC+BNP+NYHA merge.R
 #
-#R code to merge NYHA and BNP data into RHC data table
-#Merging done by HospNo and Date, where Date is same or earlier than Date in RHC data table
-#Code based on: https://stackoverflow.com/questions/33357341/data-table-join-on-id-and-date-key-but-want-closest-date-before-or-equal-to
+#R code to merge NYHA, BNP and RHC data into Camphor data table using HospNo and nearest neighbour Date using 
 #
 #DEPENDENCIES (automatically installed)
 #
@@ -12,7 +10,7 @@
 #data.table - fast aggregation and joins of large data: https://cran.r-project.org/web/packages/data.table/index.html
 #
 #NOTEs
-# merge roll to Infinity is used, i.e. return closest session before.  This could be substituted for a rolling window, but current approach allows windowing to be done in Excel/BI
+#Check for errors in some merges, too much data returned
 
 #Check if packages are installed, if not install them, then load the liraries:
 if (!require("pacman")) install.packages("pacman")
@@ -40,19 +38,13 @@ NYHAData <- unique(NYHAData)
 RHCData <- unique(RHCData)
 CAMPHORData <- unique (CAMPHORData)
 
-
-
-########################################
-#make an copy of RHC table to merge into, ordered by HospNo and then Date
-#THIS MEANS THAT RHCData IS THE BASE TABLE, this may not be optimal
+#make an copy of CAMPHOR data to merge into, and sort it
 MergedTable <- CAMPHORData[order(HospNo, Date)]
-########################################
 
 
 ########################################
-#For every patient (HospNo) and Date in RHCData data table, find the index of _
-#the Date in BNPdata date table that is on or BEFORE the Date in RHCData 
-#NOTE: if patient not in BNPdata, NA is returned 	
+#merge in BNPData
+#NOTE: if patient not in BNPData, NA is returned 	
 indx_BNP <- BNPData[CAMPHORData,
                     on = c(HospNo = "HospNo", 
                            Date = "Date"), 
@@ -65,9 +57,7 @@ MergedTable[, BNP := BNPData[indx_BNP,ProBNP]]
 
 
 ########################################
-#For every patient (HospNo) and Date in NYHAData data table, find the index of _
-#the Date in NYHAData date table that is on or BEFORE the Date in RHCData 
-#NOTE: if patient not in NYHAData, NA is returned 	
+#merge in NYHA data	
 indx_NYHA <- NYHAData[CAMPHORData,
                       on = c(HospNo = "HospNo", 
                              Date = "Date"), 
@@ -78,20 +68,16 @@ indx_NYHA <- NYHAData[CAMPHORData,
 MergedTable[, NYHA_Matched_Date := NYHAData[indx_NYHA,Date]]
 MergedTable[, NYHA := NYHAData[indx_NYHA,NYHA]]
 
+
 #######################################
-
-
 #edit RHCData column names to remove data identifiers 'str' and 'dtm' ('boo' is kept)
-
 #would be more elegant to edit in just the output list, but this way the merge is easier
 RHCData_Colnames<-colnames(RHCData)
 RHCData_Colnames<-gsub("str","",RHCData_Colnames)
 RHCData_Colnames<-gsub("dtmDate","Date",RHCData_Colnames)
 colnames(RHCData)<-RHCData_Colnames
 
-#For every patient (HospNo) and Date in NYHAData data table, find the index of _
-#the Date in NYHAData date table that is on or BEFORE the Date in RHCData 
-#NOTE: if patient not in NYHAData, NA is returned 	
+#merge in RHC data
 indx_RHC <- RHCData[CAMPHORData,
                     on = c(HospNo = "HospNo", 
                            Date = "Date"), 
