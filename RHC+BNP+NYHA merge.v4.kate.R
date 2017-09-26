@@ -24,30 +24,61 @@ setwd("C:/Users/Edward/PowerFolders/MISC/Katherine R and Excel/InputFiles")
 RHCData <- read_excel("RHC_data.xlsx", sheet = "Sheet1")
 NYHAData <- read_excel("NYHA_data.xlsx", sheet = "Sheet1")
 BNPData <- read_excel("BNP_data.xlsx", sheet = "Sheet1")
-CAMPHORData <- read_excel ("Camphor_data.xlsx", sheet = "Sheet1")
+CAMPHORData <- read_excel ("Camphor_raw.xlsx", sheet = "Sheet1")
+MWDData <- read_excel ("6MWD _raw.xlsx", sheet = "Sheet1")
 
-#make the Excel data into data tables
+#make the Excel data into data.tables
 setDT(RHCData)
 setDT(NYHAData)
 setDT(BNPData)
-setDT (CAMPHORData)
+setDT(CAMPHORData)
+setDT(MWDData)
 
-#remove any duplicate rows
-BNPData <- unique(BNPData)
-NYHAData <- unique(NYHAData)
-RHCData <- unique(RHCData)
-CAMPHORData <- unique (CAMPHORData)
+#Possibility to set dates to IDate class for use in data.table
+#Date calculations work anyway using Lubridate
+#This data class doesn't work in PowerBI, would have to set back to POSIXct
+  #RHCData<-RHCData[, dtmDate:=as.IDate(dtmDate)]
+  #NYHAData<-NYHAData[, Date:=as.IDate(Date)]
+  #BNPData<-BNPData[, Date:=as.IDate(Date)]
+  #CAMPHORData<-CAMPHORData[, Date:=as.IDate(Date)]
+  #MWDData<-MWDData[, TestDate:=as.IDate(TestDate)]
+
+#sort all the same way (not necessary as long as merge table is sorted)
+setkey(RHCData, strHospNo, dtmDate)
+setkey(NYHAData,HospNo, Date)
+setkey(BNPData,HospNo, Date)
+setkey(CAMPHORData,HospNo, Date)
+setkey(MWDData,HospNo, TestDate)
+
+#remove any rows where same patient is seen twice on same day
+#this is important for preventing multiple match lookups
+RHCData <- unique(RHCData, by=c("strHospNo", "dtmDate"))
+NYHAData <- unique(NYHAData, by=c("HospNo", "Date"))
+BNPData <- unique(BNPData, by=c("HospNo", "Date"))
+CAMPHORData <- unique(CAMPHORData, by=c("HospNo", "Date"))
+MWDData <- unique(MWDData, by=c("HospNo", "TestDate"))
 
 #make an copy of CAMPHOR data to merge into, and sort it
-MergedTable <- CAMPHORData[order(HospNo, Date)]
+MergedTable <- CAMPHORData
+
+#merge in MWDData
+indx_MWD <- MWDData[CAMPHORData,
+                    on = c(HospNo = "HospNo", TestDate = "Date"), 
+                    roll = "nearest",
+                    which = TRUE]
+
+#make list of old and new column names, then read these into the merged table
+#written as separate lines for clarity, works as single line when code substituted
+MWD_new_col_names<-c("MWD_Matched_Date",colnames(MWDData)[-c(1,2)])
+MWD_old_col_names <- colnames(MWDData)[-1]
+MergedTable[, (MWD_new_col_names) := MWDData[indx_MWD, MWD_old_col_names, with=FALSE]]
 
 
 ########################################
 #merge in BNPData
 #NOTE: if patient not in BNPData, NA is returned 	
 indx_BNP <- BNPData[CAMPHORData,
-                    on = c(HospNo = "HospNo", 
-                           Date = "Date"), 
+                    on = c(HospNo = "HospNo", Date = "Date"), 
                     roll = "nearest",
                     which = TRUE]
 
@@ -59,10 +90,10 @@ MergedTable[, BNP := BNPData[indx_BNP,ProBNP]]
 ########################################
 #merge in NYHA data	
 indx_NYHA <- NYHAData[CAMPHORData,
-                      on = c(HospNo = "HospNo", 
-                             Date = "Date"), 
+                      on = c(HospNo = "HospNo", Date = "Date"), 
                       roll = "nearest",
                       which = TRUE]
+
 
 #Add matched BNP results to the output file: MergedTable
 MergedTable[, NYHA_Matched_Date := NYHAData[indx_NYHA,Date]]
@@ -72,39 +103,39 @@ MergedTable[, NYHA := NYHAData[indx_NYHA,NYHA]]
 #######################################
 #edit RHCData column names to remove data identifiers 'str' and 'dtm' ('boo' is kept)
 #would be more elegant to edit in just the output list, but this way the merge is easier
-RHCData_Colnames<-colnames(RHCData)
-RHCData_Colnames<-gsub("str","",RHCData_Colnames)
-RHCData_Colnames<-gsub("dtmDate","Date",RHCData_Colnames)
-colnames(RHCData)<-RHCData_Colnames
+Orig_RHC_Colnames<-colnames(RHCData)
+Orig_RHC_Colnames<-gsub("str","",Orig_RHC_Colnames)
+Orig_RHC_Colnames<-gsub("dtmDate","Date",Orig_RHC_Colnames)
+colnames(RHCData)<-Orig_RHC_Colnames
 
 #merge in RHC data
 indx_RHC <- RHCData[CAMPHORData,
-                    on = c(HospNo = "HospNo", 
-                           Date = "Date"), 
+                    on = c(HospNo = "HospNo", Date = "Date"), 
                     roll = "nearest",
                     which = TRUE]
 
 #Make list of destination columns, omitting HospNo and changing Date to RHC_Date
-RHCData_Colnames<-RHCData_Colnames[-1]
-Merged_RHC_Colnames<-gsub("Date","RHC_Matched_Date",RHCData_Colnames)
-MergedTable[, (Merged_RHC_Colnames) := RHCData[indx_RHC, RHCData_Colnames, with=FALSE]]
+Orig_RHC_Colnames<-Orig_RHC_Colnames[-1]
+Merged_RHC_Colnames<-gsub("Date","RHC_Matched_Date",Orig_RHC_Colnames)
+MergedTable[, (Merged_RHC_Colnames) := RHCData[indx_RHC, Orig_RHC_Colnames, with=FALSE]]
 
 
 
 
-#Filter to find matches within 6 months only
-Date_Threshold=178 #half a year
+#Filter to find matches within 3 months (92 days) only
+Date_Threshold=92
 #subset of i rows, where each date is less than 6 months
-MergedTable_filtered<-MergedTable[abs(ymd(Date)-ymd(BNP_Matched_Date)) < Date_Threshold & abs(ymd(Date)-ymd(NYHA_Matched_Date)) < Date_Threshold & abs(ymd(Date)-ymd(RHC_Matched_Date)) < Date_Threshold]
+MergedTable_filtered<-MergedTable[abs(ymd(Date)-ymd(BNP_Matched_Date)) < Date_Threshold & 
+                                    abs(ymd(Date)-ymd(NYHA_Matched_Date)) < Date_Threshold &
+                                    abs(ymd(Date)-ymd(RHC_Matched_Date)) < Date_Threshold &
+                                    abs(ymd(Date)-ymd(MWD_Matched_Date)) < Date_Threshold ]
+                                    
 
-#Write output
-write.csv(MergedTable, file = "RHC+BNP+NYHA merged data.V4.csv")
+#Write out
+write.csv(MergedTable, file = "RHC+BNP+NYHA merged data.V6.csv")
+write.csv(MergedTable_filtered, file = "RHC+BNP+NYHA merged filtered data.V6.csv")
 
-
-#Remove indices and vectors used
-rm(indx_BNP)
-rm(indx_NYHA)
-rm(indx_RHC)
-rm(Merged_RHC_Colnames)
-rm(RHCData_Colnames)
-
+#Remove indices, vectors, and original files used
+rm(indx_BNP,indx_NYHA, indx_RHC, indx_MWD)
+rm(Merged_RHC_Colnames, Orig_RHC_Colnames, MWD_new_col_names, MWD_old_col_names)
+rm(BNPData,CAMPHORData,MWDData,NYHAData,RHCData)
